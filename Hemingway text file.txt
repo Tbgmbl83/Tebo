@@ -1,0 +1,1018 @@
+<html lang="en-gb" prefix="og: http://ogp.me/ns# fb: http://ogp.me/ns/fb# booking_com: http://ogp.me/ns/fb/booking_com#" xmlns:og="http://opengraphprotocol.org/schema/" class=" b_chrome b_chrome_131 supports_inline-block supports_flexbox_unprefixed supports_fontface supports_hyphens  hasJS" dir="ltr"><head><script async="" src="https://www.googletagmanager.com/gtm.js?id=GTM-5Q664QZ"></script><script async="" src="//www.google-analytics.com/analytics.js"></script><script type="text/javascript" nonce="">
+document.addEventListener('DOMContentLoaded', function () {
+/**
+* provides the current user's cookie consent
+* in order to use it:
+* 1. inline privacy/cookieConsent.js in the page you need to use it.
+* please note that this library relies on window.PCM.isCountryNeedCookieBanner to be initialised
+* before using (calling getValue function) it
+* 2. in your js file:
+*
+* var privacyCookieConsent = B.require('privacyCookieConsent');
+* var consent = privacyCookieConsent.getValue();
+*/
+B.define('privacyCookieConsent', function () {
+var consentGroupIsAllowed = {
+analytical: 'C0002%3A1',
+marketing: 'C0004%3A1'
+};
+var optanonConsentCookieName = 'OptanonConsent';
+var optanonBoxClosedCookieName = 'OptanonAlertBoxClosed';
+var halfOfYearMillis = 180 * 24 * 60 * 60 * 1000;
+function isDefined(value) {
+return value && value !== "undefined";
+}
+function parseConsentToObject(consent) {
+var result = {};
+if (typeof consent === 'string') {
+var parts = consent.split('&');
+parts.forEach(function (part) {
+var keyAndValue = part.split('=');
+result[keyAndValue[0]] = keyAndValue[1];
+});
+}
+return result;
+}
+function isConsentValid(consent, alertBoxClosed) {
+return isDefined(consent) &&
+isDefined(alertBoxClosed) &&
+new Date() - new Date(alertBoxClosed) <= halfOfYearMillis;
+}
+function getCookie(name) {
+name += "=";
+var cookies = document.cookie.split(";");
+for (var i = 0; i < cookies.length; i += 1) {
+var cookie = cookies[i];
+while (cookie.charAt(0) === " ") {
+cookie = cookie.substring(1, cookie.length);
+}
+if (cookie.indexOf(name) === 0) {
+return cookie.substring(name.length, cookie.length);
+}
+}
+return null;
+}
+function doesGeolocationRequireBanner() {
+// In case window.PCM is not defined, fallback to opt-out
+return window.PCM ? window.PCM.isCountryNeedCookieBanner : true;
+}
+function getExplicitConsent() {
+var consent = getCookie(optanonConsentCookieName);
+var alertBoxClosed = getCookie(optanonBoxClosedCookieName);
+if (isConsentValid(consent, alertBoxClosed)) {
+var consentObject = parseConsentToObject(consent);
+return Object
+.keys(consentGroupIsAllowed)
+.map(function (purpose) {
+var result = {};
+result[purpose] = consentObject.groups.indexOf(consentGroupIsAllowed[purpose]) > -1;
+return result;
+})
+.reduce(
+function (result, currentValue) {
+return Object.assign(result, currentValue);
+}, {
+functional: true
+}
+);
+}
+}
+function getImplicitConsent() {
+var consentValue = !doesGeolocationRequireBanner();
+return {
+functional: true,
+analytical: consentValue,
+marketing: consentValue
+};
+}
+function getValue() {
+var consent = getExplicitConsent();
+if (!consent) {
+consent = getImplicitConsent();
+}
+return consent;
+}
+return {
+getValue: getValue
+};
+});
+//c360 javascript tracker first iteration
+//sends a track request to c360 http tracker
+//in order to use it:
+//1. inline the c360Tracker.js in the page you need to use it
+//2. in your js file:
+//
+// var c360Tracker = B.require('c360Tracker');
+// var event = {
+// action_name:"accommodation_checkout_confirmation_viewed",
+// action_version :"0.2.0",
+// content : { "transaction_id" : 123434},
+// user : { "BKNG_user_id": 123434}
+// };
+// c360Tracker.track(event);
+B.define('c360Tracker', function () {
+var enrichedContext = {};
+var queue = [];
+var queueTimeout = null;
+var flushInterval = 1000;
+var flushSize = 10;
+var configuration = {
+validateInput: false
+};
+var track = function (event) {
+if (event == null) {
+return "event object is null or empty";
+} else {
+var validationResult = new ValidationResult(true);
+if (configuration.validateInput) {
+validationResult = validateInput(event);
+}
+if (!validationResult.success) {
+return validationResult.message;
+}
+enqueue(event);
+//send([event]); to send it syncrounously
+}
+};
+function enqueue(event) {
+if (queue.length == 0) {
+queueTimeout = setTimeout(flush, flushInterval);
+}
+queue.push(event);
+if (queue.length >= flushSize) {
+if (queueTimeout !== null) {
+clearTimeout(queueTimeout);
+}
+flush();
+return;
+}
+}
+function flush() {
+send(queue, true);
+queue = [];
+queueTimeout = null;
+}
+function withContextProvider(isFlush) {
+var trackerVersion = '0.1.0'
+if (isFlush) {
+trackerVersion = '0.1.1';
+}
+return function (item) {
+return Object.assign({}, item, {
+context: enrichedContext,
+tracker: {
+tracker_name: 'C360JSTracker',
+tracker_type: 'Client',
+tracker_version: trackerVersion
+}
+});
+}
+}
+function send(events, isFlush) {
+var payload = {
+events: events.map(withContextProvider(isFlush))
+};
+return $.ajax({
+url: '/c360/v1/track',
+type: 'POST',
+dataType: 'json',
+data: JSON.stringify(payload),
+});
+}
+enrich();
+var scheme =
+{
+"type": "object",
+"properties": {
+"action_name": {
+"type": "string",
+"description": "action name (ex. element viewed)",
+},
+"action_version": {
+"type": "string",
+"description": "action version"
+},
+"content": {
+"type": "object",
+"description": "content defined by the registered producer scheme"
+}
+}
+};
+function ValidationResult(success, message) {
+this.success = success;
+this.message = message;
+}
+function validateInput(event) {
+var result = validateObject(event, scheme);
+return result;
+}
+function validateObject(obj, scheme) {
+if (scheme.properties != null) {
+var propsArray = Object.getOwnPropertyNames(scheme.properties);
+for (var i = 0; i < propsArray.length; i++) {
+var propertyName = propsArray[i];
+if (obj[propertyName] == null) {
+return new ValidationResult(false, "property " + propertyName + " is not defined");
+}
+if (scheme.properties[propertyName].type == "object") {
+var validationResult = validateObject(obj[propertyName], scheme.properties[propertyName]);
+if (validationResult.success === false) {
+return validationResult;
+}
+}
+}
+}
+return new ValidationResult(true);
+}
+function enrich() {
+enrichedContext = {
+page: {
+page_referrer: document.referrer,
+page_url: window.location.href,
+page_title: document.title
+},
+local: {
+currency: B.env.b_selected_currency
+},
+};
+//if (B.env.b_user_genius_status != null && B.env.b_user_genius_status.b_user_id != null)
+// enrichedContext.userID = B.env.b_user_genius_status.b_user_id;
+}
+return {
+track: track
+};
+});
+})
+</script>
+<script type="text/javascript" nonce="" src="https://cdn.cookielaw.org/consent/3ea94870-d4b1-483a-b1d2-faf1d982bb31/OtAutoBlock.js"></script>
+<script type="text/javascript" nonce="">
+window.PCM = {
+isCountryNeedCookieBanner: 0,
+isGpcSignalEnabled: 1,
+loadStartedAt: 1743167103,
+countryCode: 'za',
+isUserLoggedIn: 0,
+verifyEnabled: 1,
+};
+</script>
+<script type="text/javascript" nonce="" src="https://cf.bstatic.com/libs/privacy-consent/releases/2.1.65/customer/cookie-banner.min.js" data-domain-script="3ea94870-d4b1-483a-b1d2-faf1d982bb31"></script><script type="text/javascript" async="true" src="https://cdn.cookielaw.org/scripttemplates/otSDKStub.js" charset="UTF-8" data-document-language="true" data-domain-script="3ea94870-d4b1-483a-b1d2-faf1d982bb31" nonce=""></script>
+<link href="https://cf.bstatic.com" rel="dns-prefetch" crossorigin="">
+<link href="https://cf.bstatic.com" rel="dns-prefetch" crossorigin="">
+
+<meta name="referrer" content="origin-when-cross-origin">
+<meta http-equiv="content-type" content="text/html; charset=utf-8">
+<script nonce=""> function b_cors_check(supported) { var value = supported ? 1 : 0; if (!/(^|;)\s*cors_js=/.test(document.cookie)) { var d = new Date(); d.setTime(d.getTime() + 60 * 60 * 24 * 365 * 1000); var cookieDomain = '.booking.com' || '.booking.com'; document.cookie = 'cors_js=' + value +'; domain=' + cookieDomain + '; path=/; expires=' + d.toGMTString(); } if (!value) { location.reload(); } } </script>
+<script nonce="">(function(d) { d.addEventListener('error', function(e) { if (e.target && e.target.classList.contains('crossorigin-check-js')) { b_cors_check(false); } }, true); })(document); </script>
+<script class="crossorigin-check-js" src="https://cf.bstatic.com/static/js/crossorigin_check_cloudfront_sd/2454015045ef79168d452ff4e7f30bdadff0aa81.js" async="" crossorigin="" nonce=""></script>
+<script nonce=""> 
+;(function() {
+window.b_early_errors = window.b_early_errors || [];
+window.onerror = function() {
+window.b_early_errors.push(arguments);
+};
+}());
+ </script>
+<link rel="stylesheet" id="main-css-preload" href="https://cf.bstatic.com/static/css/main_cloudfront_sd.iq_ltr/fef9000194dcecfd2ccd6d546da23b43518ed7ea.css" data-main-css="1">
+<script nonce="">
+document.querySelector('#main-css-preload').addEventListener('load', function() {
+window.mainCssWasLoaded = 1;
+})
+</script>
+<link rel="stylesheet" href="https://cf.bstatic.com/static/css/main_exps_cloudfront_sd.iq_ltr/22870d2036e5b5667d39fb7d0c2c8e937d5d2a13.css">
+<link rel="stylesheet" href="https://cf.bstatic.com/static/css/gprof_icons_cloudfront_sd.iq_ltr/308436ca26aacf6a7553e4c0cf298d0f780727a2.css"> 
+<link rel="stylesheet" type="text/css" href="https://cf.bstatic.com/static/css/hotel_base_cloudfront_sd.iq_ltr/bf1ae6c37a043562b49c58c1d8bb4e9af4184792.css" media="screen">
+<link rel="stylesheet" type="text/css" href="https://cf.bstatic.com/static/css/hotel_experiments_cloudfront_sd.iq_ltr/49b07aff0ffe32d4485878d068a47bdc03a716b4.css" media="screen">
+<link rel="stylesheet" type="text/css" href="https://cf.bstatic.com/static/css/hotel_experiments_rtrw_cloudfront_sd.iq_ltr/22180a8bb347a6d94c6b95d823b5f699d0ab63f0.css" media="screen">
+<link rel="prefetch" data-defer-prefetch="" href="https://cf.bstatic.com/static/css/searchresults_cloudfront_sd.iq_ltr/d12f634f629d2f670c94a88d194e5002d3aee1b5.css">
+<link rel="prefetch" data-defer-prefetch="" href="https://cf.bstatic.com/static/css/book_cloudfront_sd.iq_ltr/026b2ce91f272b27390de21260627b1f616f3879.css">
+<link rel="stylesheet" type="text/css" href="https://cf.bstatic.com/static/css/xp-isolated-sb_cloudfront_sd.iq_ltr/0e5fbb54fd683bea6b2eeb7abb5feabbf256d91a.css" media="screen, print">
+<link rel="stylesheet" type="text/css" href="https://cf.bstatic.com/static/css/incentives_cloudfront_sd.iq_ltr/f1558a6e9832a4eb8cfe1d3d14db176bd3564335.css" media="screen">
+ <link rel="stylesheet" href="https://cf.bstatic.com/static/css/mlt_cloudfront_sd.iq_ltr.css">  
+ <style nonce=""> #basiclayout, .basiclayout { margin: 0; } #special_actions { margin: 3px 15px 3px 0; } .ticker_space { margin-top: 3px !important; } #logo_no_globe_new_logo { top: 14px; } .b_msie_6 #top, .b_msie_6 body.header_reshuffle #top {height:61px !important;} .b_msie_6 #special_actions { margin: 3px 15px 3px 0; overflow:visible; } body.header_reshuffle #top { min-height: 50px !important; height: auto !important; } .nobg { background: #fff url("https://cf.bstatic.com/static/img/nobg_all_blue_iq/b700d9e3067c1186a3364012df4fe1c48ae6da44.png") repeat-x; background-position: 0 -50px; } </style> 
+<link rel="preload" as="script" href="https://cf.bstatic.com/static/js/core-deps-inlinedet_cloudfront_sd/f62025e692b596dd53ecd1bd082dfd3197944c50.js" crossorigin="" nonce="">
+<link rel="preload" as="script" href="https://cf.bstatic.com/static/js/jquery_cloudfront_sd/e1e8c0e862309cb4caf3c0d5fbea48bfb8eaad42.js" crossorigin="" nonce="">
+<link rel="preload" as="script" href="https://cf.bstatic.com/static/js/main_cloudfront_sd/38f9e1fc64dd55dc4509db117819ab6edc866676.js" crossorigin="" nonce="">
+<link rel="preload" as="script" href="https://cf.bstatic.com/static/js/searchbox_cloudfront_sd/b3c5d3f7069cc96a4a9015a241a291577359e7af.js" crossorigin="" nonce="">
+<link rel="preload" as="script" href="https://cf.bstatic.com/static/js/hotel_cloudfront_sd/cef8dbc5ce64d74d827ff71f33739514efbe58a1.js" crossorigin="" nonce="">
+<link rel="preload" as="script" href="https://cf.bstatic.com/static/js/hotel_experiments_rtrw_cloudfront_sd/6c6bad994ff9883ba5bf90db2cf2745867faaeab.js" crossorigin="" nonce="">
+<link rel="preload" as="script" href="https://cf.bstatic.com/static/js/error_catcher_bec_cloudfront_sd/c40c55637440286271899bb4294fd743b387ac07.js" crossorigin="" nonce="">
+<script nonce=""> if( window.performance && performance.measure && 'b-stylesheets') { performance.measure('b-stylesheets'); } </script><title>The Hemingway House 1415 min from O.R Tambo., Benoni (updated prices 2025)</title>
+<meta name="description" content="Located in Benoni, 4.2 km from Saps Mechanical School Golf Club and 8.3 km from Ebotse Golf and Country Estate, The Hemingway House 1415 min from O.R...">
+<meta name="keywords" content="The Hemingway House 1415 min from O.R Tambo., Benoni, South Africa, R:Gauteng, Hotel, Hotels">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.en-gb.html">
+<link rel="alternate" href="android-app://com.booking/booking/hotel/11511918?affiliate_id=375119">
+<meta name="booking-verification" content="sf9AAD0rwLFUroHR-3Cs_Puc1DRvg0G_ywm0CXZ4M4aQl7SO7Cl7_BYiXXcZveniz4H7Cytr6BWFXMQAKMaXEuTIVP7p1IYnvu7-AH_0X2pVPDFg702CwOGCeks1VbdWc_FiN1bqqsUq01gyGYqhC_p3z6JASol8S1oAod_F70IGMTooITNt8yK7qrTmALewfHc__MplOBCLRBFwpIdTK03tSmzLVUD0GLPokLQfPW0LN3iJzFNQgHSG-xuiWEDfPYxRX1ikrNp2IMMM0yz7U1iehuOFvuNF9hjljIFFvx6wEtM6G8jxx9Nz8urKGRYjQIUFyWlucO61Ik63MP2X18C_TbiJ2Z4HTprcu4jr45SjSpVMU3vEI8nHJma_DuM5oWWvmlZ9_y2RP17flFEjjBXH2ZI2lRrKeEYcNsk27EDmWQ6RhG5XJz42wdhjslVuNzbvloQ-srNiEeS1Tg3UmgnzMnLYumYgBl-dit7KJHQ">
+<meta name="twitter:app:id:iphone" content="367003839">
+<meta name="twitter:app:name:ipad" content="Booking.com Hotel Reservations Worldwide &amp; Hotel Deals">
+<meta name="twitter:app:id:ipad" content="367003839">
+<meta name="twitter:app:name:googleplay" content="Booking.com Hotel Reservations">
+<meta name="twitter:app:id:googleplay" content="com.booking">
+<meta property="al:ios:app_store_id" content="367003839">
+<meta property="al:ios:app_name" content="Booking.com Hotel Reservations">
+<meta property="al:android:app_name" content="Booking.com Hotel Reservation">
+<meta property="al:android:package" content="com.booking">
+<meta name="twitter:title" content="The Hemingway House 1415 min from O.R Tambo., Benoni, South Africa">
+<meta name="twitter:description" content="Located in Benoni, 4.2 km from Saps Mechanical School Golf Club and 8.3 km from Ebotse Golf and Country Estate, The Hemingway House 1415 min from O.R...">
+<meta name="twitter:image" content="https://cf.bstatic.com/xdata/images/hotel/max1024x768/526656191.jpg?k=b22350a77b08b1344bbc91eca9225b8bfc9ae836a5d9e30f456e57a7804a0573&amp;o=&amp;hp=1">
+<meta name="twitter:app:url:iphone" content="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.html?aid=375119&amp;label=gog235jc-1RCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIC0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIG4AIB">
+<meta name="twitter:app:url:ipad" content="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.html?aid=375119&amp;label=gog235jc-1RCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIC0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIG4AIB">
+<meta name="twitter:app:url:googleplay" content="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.html?aid=375119&amp;label=gog235jc-1RCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIC0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIG4AIB">
+<meta property="al:ios:url" content="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.html?aid=375119&amp;label=gog235jc-1RCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIC0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIG4AIB">
+<meta property="al:android:url" content="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.html?aid=375119&amp;label=gog235jc-1RCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIC0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIG4AIB">
+<meta name="p:domain_verify" content="ff7f0b90ebb93e5bf7c7cafe77640ec1">
+<meta http-equiv="content-language" content="en-gb">
+<meta http-equiv="content-script-type" content="text/javascript">
+<meta http-equiv="content-style-type" content="text/css">
+<meta http-equiv="window-target" content="_top">
+<meta property="fb:pages" content="131840030178250, 1425349334428496, 117615518393985, 1565844503706287, 517612321758712, 1668799180037291, 265097377176252, 1643712662515912, 303492549842824, 1638321783047271, 809709019119342, 959185470826086, 217466488652137, 641365839348517, 203741606405114">
+<meta property="wb:webmaster" content="48970bbca45d28c2">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@bookingcom">
+<meta name="twitter:creator" content="@bookingcom">
+<meta property="og:title" content="The Hemingway House 1415 min from O.R Tambo., Benoni, South Africa">
+<meta property="og:description" content="Located in Benoni, 4.2 km from Saps Mechanical School Golf Club and 8.3 km from Ebotse Golf and Country Estate, The Hemingway House 1415 min from O.R...">
+<meta property="og:image" content="https://cf.bstatic.com/xdata/images/hotel/max1024x768/526656191.jpg?k=b22350a77b08b1344bbc91eca9225b8bfc9ae836a5d9e30f456e57a7804a0573&amp;o=&amp;hp=1">
+<meta property="og:image:width" content="1024">
+<meta property="og:image:height" content="682">
+<meta property="booking_com:location:latitude" content="">
+<meta property="booking_com:location:longitude" content="">
+<meta property="og:locale" content="en_GB">
+<meta property="og:url" content="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.en-gb.html">
+<meta property="og:site_name" content="Booking.com">
+<meta property="fb:app_id" content="145362478954725">
+<link rel="alternate" type="text/html" hreflang="en-gb" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.en-gb.html" title="English (UK)">
+<link rel="alternate" type="text/html" hreflang="en-us" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.html" title="English (US)">
+<link rel="alternate" type="text/html" hreflang="de" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.de.html" title="Deutsch">
+<link rel="alternate" type="text/html" hreflang="nl" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.nl.html" title="Nederlands">
+<link rel="alternate" type="text/html" hreflang="fr" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.fr.html" title="Français">
+<link rel="alternate" type="text/html" hreflang="es" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.es.html" title="Español">
+<link rel="alternate" type="text/html" hreflang="es-ar" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.es-ar.html" title="Español (AR)">
+<link rel="alternate" type="text/html" hreflang="es-mx" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.es-mx.html" title="Español (MX)">
+<link rel="alternate" type="text/html" hreflang="ca" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.ca.html" title="Català">
+<link rel="alternate" type="text/html" hreflang="it" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.it.html" title="Italiano">
+<link rel="alternate" type="text/html" hreflang="pt-pt" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.pt-pt.html" title="Português (PT)">
+<link rel="alternate" type="text/html" hreflang="pt-br" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.pt-br.html" title="Português (BR)">
+<link rel="alternate" type="text/html" hreflang="no" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.no.html" title="Norsk">
+<link rel="alternate" type="text/html" hreflang="fi" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.fi.html" title="Suomi">
+<link rel="alternate" type="text/html" hreflang="sv" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.sv.html" title="Svenska">
+<link rel="alternate" type="text/html" hreflang="da" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.da.html" title="Dansk">
+<link rel="alternate" type="text/html" hreflang="cs" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.cs.html" title="Čeština">
+<link rel="alternate" type="text/html" hreflang="hu" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.hu.html" title="Magyar">
+<link rel="alternate" type="text/html" hreflang="ro" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.ro.html" title="Română">
+<link rel="alternate" type="text/html" hreflang="ja" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.ja.html" title="日本語">
+<link rel="alternate" type="text/html" hreflang="zh-cn" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.zh-cn.html" title="简体中文">
+<link rel="alternate" type="text/html" hreflang="zh-tw" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.zh-tw.html" title="繁體中文">
+<link rel="alternate" type="text/html" hreflang="pl" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.pl.html" title="Polski">
+<link rel="alternate" type="text/html" hreflang="el" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.el.html" title="Ελληνικά">
+<link rel="alternate" type="text/html" hreflang="ru" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.ru.html" title="Русский">
+<link rel="alternate" type="text/html" hreflang="tr" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.tr.html" title="Türkçe">
+<link rel="alternate" type="text/html" hreflang="bg" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.bg.html" title="Български">
+<link rel="alternate" type="text/html" hreflang="ar" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.ar.html" title="العربية">
+<link rel="alternate" type="text/html" hreflang="ko" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.ko.html" title="한국어">
+<link rel="alternate" type="text/html" hreflang="he" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.he.html" title="עברית">
+<link rel="alternate" type="text/html" hreflang="lv" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.lv.html" title="Latviski">
+<link rel="alternate" type="text/html" hreflang="uk" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.uk.html" title="Українська">
+<link rel="alternate" type="text/html" hreflang="hi" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.hi.html" title="हिन्दी">
+<link rel="alternate" type="text/html" hreflang="id" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.id.html" title="Bahasa Indonesia">
+<link rel="alternate" type="text/html" hreflang="ms" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.ms.html" title="Bahasa Malaysia">
+<link rel="alternate" type="text/html" hreflang="th" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.th.html" title="ภาษาไทย">
+<link rel="alternate" type="text/html" hreflang="et" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.et.html" title="Eesti">
+<link rel="alternate" type="text/html" hreflang="hr" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.hr.html" title="Hrvatski">
+<link rel="alternate" type="text/html" hreflang="lt" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.lt.html" title="Lietuvių">
+<link rel="alternate" type="text/html" hreflang="sk" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.sk.html" title="Slovenčina">
+<link rel="alternate" type="text/html" hreflang="sr" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.sr.html" title="Srpski">
+<link rel="alternate" type="text/html" hreflang="sl" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.sl.html" title="Slovenščina">
+<link rel="alternate" type="text/html" hreflang="vi" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.vi.html" title="Tiếng Việt">
+<link rel="alternate" type="text/html" hreflang="tl" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.tl.html" title="Filipino">
+<link rel="alternate" type="text/html" hreflang="is" href="https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.is.html" title="Íslenska">
+<link rel="icon" href="https://cf.bstatic.com/static/img/favicon/9ca83ba2a5a3293ff07452cb24949a5843af4592.svg" type="image/svg+xml">
+<link rel="icon" href="https://cf.bstatic.com/static/img/favicon/4a3b40c4059be39cbf1ebaa5f97dbb7d150926b9.png" type="image/png" sizes="192x192">
+<link rel="icon" href="https://cf.bstatic.com/static/img/favicon/40749a316c45e239a7149b6711ea4c48d10f8d89.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="https://cf.bstatic.com/static/img/apple-touch-icon/5db9fd30d96b1796883ee94be7dddce50b73bb38.png">
+<link rel="help" href="/faq.en-gb.html?aid=356980&amp;label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&amp;sid=671a17eb382e6776a731e95cded70942&amp;">
+<link rel="search" type="application/opensearchdescription+xml" href="https://cf.bstatic.com/static/opensearch/en-gb/4e7571db3e3392305a9bed7c8dae0d335160dc74.xml" title="Booking.com online hotel reservations">
+<link href="https://plus.google.com/105443419075154950489" rel="publisher">
+<script type="application/ld+json" nonce="">
+{
+   "description" : "Located in Benoni, 4.2 km from Saps Mechanical School Golf Club and 8.3 km from Ebotse Golf and Country Estate, The Hemingway House 1415 min from O.R...",
+   "aggregateRating" : {
+      "@type" : "AggregateRating",
+      "ratingValue" : 10.0,
+      "bestRating" : 10,
+      "reviewCount" : 1
+   },
+   "priceRange" : "Prices for upcoming dates start at ZAR&nbsp;1,800 per night (We Price Match)",
+   "image" : "https://cf.bstatic.com/xdata/images/hotel/max500/526656191.jpg?k=b22350a77b08b1344bbc91eca9225b8bfc9ae836a5d9e30f456e57a7804a0573&o=&hp=1",
+   "hasMap" : "https://maps.googleapis.com/maps/api/staticmap?size=1600x1200&zoom=15&sensor=false&markers=color:blue%7c-26.1852012,28.3022658&center=-26.1852012,28.3022658&client=gme-booking&channel=booking-frontend&signature=JMkWkRNe7_28kv6AJ7xPW57OES8=",
+   "@context" : "http://schema.org",
+   "name" : "The Hemingway House 1415 min from O.R Tambo.",
+   "url" : "https://www.booking.com/hotel/za/the-hemingway-house-1415-min-from-or-tambo.en-gb.html",
+   "@type" : "Hotel",
+   "address" : {
+      "addressLocality" : "21 Somerset Avenue",
+      "addressCountry" : "South Africa",
+      "addressRegion" : "Gauteng",
+      "@type" : "PostalAddress",
+      "streetAddress" : "21 Somerset Avenue, 1500 Benoni, South Africa",
+      "postalCode" : "1500"
+   }
+}
+</script>
+<script nonce="">
+/*
+*/
+(function avoidingXSSviaLocationHash() {
+var location = window.location,
+hash = location.hash,
+xss = /[<>'"]/;
+if (
+xss.test( decodeURIComponent( hash ) ) ||
+xss.test( hash )
+) {
+location.hash = '';
+}
+})();
+document.documentElement.className = document.documentElement.className.replace('noJS', '') + ' hasJS';
+var b_experiments = {}, WIDTH, B = window.booking = {
+_onfly: [], // "on the fly" functions, will be executed as soon as external js files were loaded
+devTools: {
+trackedExperiments: []
+},
+user: {
+},
+env : {
+isRetina : window.devicePixelRatio > 1,
+"b_gtt": 'dLYAeZFVJfNTBBSSUZWCSbYTKVJBJZeBFPGNdHXT',
+"b_action" : 'hotel',
+"b_secure_domain" : 'https://secure.booking.com',
+"b_site_type" : 'www',
+"b_site_type_id": '1',
+"b_agent_is_no_robot": true,
+"b_agent_is_robot": false,
+"b_query_params_with_lang_no_ext": '?aid=356980&label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&sid=671a17eb382e6776a731e95cded70942',
+"b_query_params_with_lang_no_ext_enforce_lang_aid_currency": '?aid=356980&label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&sid=671a17eb382e6776a731e95cded70942;lang=en-gb;aid=356980;selected_currency=ZAR',
+"b_travel_comm_url_with_lang": 'https://community.booking.com/?profile.language=en-gb',
+"b_calendar2" : '1',
+"BHDTJdReLGMeEcYPffcVDZBZMO": true,
+"b_max_los_data_for_prefilled_dest" : {"experiment":"BHDTJdReQHUYYOLEaMYYXO","extended_los":90,"max_allowed_los":90,"default_los":45,"is_fullon":0,"has_extended_los":1},
+/*
+*/
+"b_partner_channel_id": '17',
+"b_bookings_owned": '1',
+"b_google_maps_key_params" : 'true&indexing=true',
+"b_lang" : 'en',
+"b_has_valid_dates": 0,
+"b_countrycode" : 'za',
+"b_guest_country" : 'za',
+"b_locale" : 'en-gb',
+"b_lang_for_url" : 'en-gb',
+"b_this_urchin" : '/hotel/za/the-hemingway-house-1415-min-from-or-tambo.en-gb.html?label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&room1=A%2CA&amp;sb_price_type=total&amp;type=total&&',
+"b_flag_to_suggest" : 'za',
+"b_companyname" : 'Booking.com',
+"b_partner_vertical" : 'channel_seo',
+b_date_format: {"day_of_month_only":"{day_of_month}","short_date_with_weekday_without_year":"{short_weekday} {day_of_month} {short_month_name}","day_short_month_year_time_between":"{day_of_month} {short_month_name} {full_year}, {time}–{time_until}","day_short_month_year_between":"{day_of_month} {short_month_name} {full_year} – {day_of_month_until} {short_month_name_until} {full_year_until}","in_month_with_year":"in {month_name_in} {full_year}","date_with_year":"{day_of_month} {month_name} {full_year}","date_with_weekday_time_until":"{weekday} {begin_marker}{day_of_month} {month_name}{end_marker} {full_year} until {time}","short_month_with_year":"{short_month_name} {full_year}","numeric_date":"{day_of_month}/{month}/{full_year}","day_short_month_between":"{day_of_month} {short_month_name} – {day_of_month_until} {short_month_name_until}","date_with_weekday_from":"{weekday_from} {day_of_month} {month_name_from} {full_year}","numeric_date_range_both_years":"{day_of_month}/{month}/{full_year} - {day_of_month_until}/{month_until}/{full_year_until}","day_short_month_time_between":"{day_of_month} {short_month_name}, {time}–{time_until}","day_short_month_year_time":"{day_of_month} {short_month_name} {full_year}, {time}","long_date_range_both_years":"{day_of_month} {month_name} {full_year} – {day_of_month_until} {month_name_until} {full_year_until}","numeric_date_range":"{day_of_month}/{month} - {day_of_month_until}/{month_until}","date_with_short_weekday_without_year":"{short_weekday} {day_of_month} {month_name}","short_date_without_year":"{day_of_month} {short_month_name}","date_with_weekday_time_from":"{weekday} {begin_marker}{day_of_month} {month_name}{end_marker} {full_year} from {time}","date_with_weekday_time_at":"date_with_weekday_time_at","range_from_long_date_time_until_long_date_time":"from {day_of_month} {month_name} {full_year} at {time} until {day_of_month_until} {month_name_until} {full_year_until} at {time_until}","from_month_with_year":"since {month_name_from} {full_year}","date_with_weekday_with_markers":"{weekday} {begin_marker}{day_of_month} {month_name}{end_marker} {full_year}","day_short_month_time":"{day_of_month} {short_month_name}, {time}","short_date":"{day_of_month} {short_month_name} {full_year}","short_date_without_year_range":"{day_of_month} {short_month_name} - {day_of_month_until} {short_month_name_until}","date_with_weekday":"{weekday} {day_of_month} {month_name} {full_year}","date_range_with_short_weekday_short_month":"{short_weekday} {day_of_month} {short_month_name} – {short_weekday_until} {day_of_month_until} {short_month_name_until}","date_with_short_weekday_with_year":"{short_weekday} {day_of_month} {month_name} {full_year}","date_with_weekday_time_from_until":"{weekday} {begin_marker}{day_of_month} {month_name}{end_marker} {full_year} from {time} until {time_until}","short_date_with_weekday":"{short_weekday} {day_of_month} {short_month_name} {full_year}","date_without_year":"{day_of_month} {month_name}","month_with_year":"{month_name_with_year_only} {full_year}","short_weekday_only":"{short_weekday}","month_name_only":"{month_name_nom}","date_with_weekday_to":"{weekday_to} {day_of_month} {month_name_to} {full_year}","short_month_only":"{short_month_name}"},
+b_month_for_formatted_date: {"1":{"month_2":"January","name_uc":"January","name_in":"January","month_1":"January","name_from":"January","name":"January","name_with_year_only":"January","short_name":"Jan","name_lc":"January","day_to":"January","in_month_lc":"in January","name_def_article_uc":"The January","genitive_uc":"January","to_month_lc":"to January","name_other":"January","genitive_lc":"January","on_day_month":"01","short_name_uc":"January","name_to":"January","name_only":"January","name_def_article_lc":"the January","short_name_only":"Jan"},"10":{"short_name_only":"Oct","in_month_lc":"in October","name_only":"October","name_lc":"October","name_def_article_lc":"the October","short_name":"Oct","short_name_uc":"October","name_to":"October","name_from":"October","name":"October","name_with_year_only":"October","name_in":"October","month_1":"October","name_other":"October","on_day_month":"10","genitive_lc":"October","genitive_uc":"October","name_uc":"October","to_month_lc":"to October","month_2":"October","name_def_article_uc":"The October"},"11":{"short_name":"Nov","name_def_article_lc":"the November","name_lc":"November","name_only":"November","in_month_lc":"in November","short_name_only":"Nov","month_2":"November","name_def_article_uc":"The November","genitive_uc":"November","name_uc":"November","to_month_lc":"to November","name_other":"November","on_day_month":"11","genitive_lc":"November","month_1":"November","name_in":"November","name":"November","name_to":"November","short_name_uc":"November","name_from":"November","name_with_year_only":"November"},"12":{"genitive_uc":"December","name_uc":"December","to_month_lc":"to December","month_2":"December","name_def_article_uc":"The December","name":"December","short_name_uc":"December","name_to":"December","name_from":"December","name_with_year_only":"December","name_other":"December","on_day_month":"12","genitive_lc":"December","name_in":"December","month_1":"December","name_def_article_lc":"the December","name_lc":"December","name_only":"December","short_name":"Dec","in_month_lc":"in December","short_name_only":"Dec"},"2":{"name_lc":"February","day_to":"February","short_name":"Feb","in_month_lc":"in February","name_uc":"February","month_2":"February","name_from":"February","name":"February","name_with_year_only":"February","month_1":"February","name_in":"February","name_only":"February","name_def_article_lc":"the February","short_name_only":"Feb","genitive_uc":"February","to_month_lc":"to February","name_def_article_uc":"The February","short_name_uc":"February","name_to":"February","on_day_month":"02","name_other":"February","genitive_lc":"February"},"3":{"name_only":"March","name_def_article_lc":"the March","short_name_only":"Mar","genitive_uc":"March","to_month_lc":"to March","name_def_article_uc":"The March","name_to":"March","short_name_uc":"March","on_day_month":"03","name_other":"March","genitive_lc":"March","name_lc":"March","day_to":"March","short_name":"Mar","in_month_lc":"in March","name_uc":"March","month_2":"March","name_from":"March","name":"March","name_with_year_only":"March","name_in":"March","month_1":"March"},"4":{"on_day_month":"04","genitive_lc":"April","name_other":"April","month_1":"April","name_in":"April","name":"April","short_name_uc":"April","name_to":"April","name_from":"April","name_with_year_only":"April","month_2":"April","name_def_article_uc":"The April","genitive_uc":"April","name_uc":"April","to_month_lc":"to April","in_month_lc":"in April","short_name_only":"Apr","short_name":"Apr","name_lc":"April","name_def_article_lc":"the April","name_only":"April"},"5":{"short_name_only":"May","in_month_lc":"in May","short_name":"May","name_only":"May","name_lc":"May","name_def_article_lc":"the May","name_in":"May","month_1":"May","on_day_month":"05","name_other":"May","genitive_lc":"May","name_to":"May","short_name_uc":"May","name_from":"May","name":"May","name_with_year_only":"May","month_2":"May","name_def_article_uc":"The May","genitive_uc":"May","name_uc":"May","to_month_lc":"to May"},"6":{"name_def_article_uc":"The June","month_2":"June","to_month_lc":"to June","name_uc":"June","genitive_uc":"June","on_day_month":"06","name_other":"June","genitive_lc":"June","month_1":"June","name_in":"June","name_with_year_only":"June","name":"June","name_from":"June","short_name_uc":"June","name_to":"June","short_name":"Jun","name_def_article_lc":"the June","name_lc":"June","name_only":"June","in_month_lc":"in June","short_name_only":"Jun"},"7":{"month_2":"July","name_def_article_uc":"The July","genitive_uc":"July","name_uc":"July","to_month_lc":"to July","month_1":"July","name_in":"July","name_other":"July","on_day_month":"07","genitive_lc":"July","short_name_uc":"July","name_from":"July","name_to":"July","name":"July","name_with_year_only":"July","short_name":"Jul","name_only":"July","name_def_article_lc":"the July","name_lc":"July","short_name_only":"Jul","in_month_lc":"in July"},"8":{"name_with_year_only":"August","short_name_uc":"August","name_from":"August","name_to":"August","name":"August","month_1":"August","name_in":"August","name_other":"August","on_day_month":"08","genitive_lc":"August","name_uc":"August","to_month_lc":"to August","genitive_uc":"August","name_def_article_uc":"The August","month_2":"August","short_name_only":"Aug","in_month_lc":"in August","name_only":"August","name_lc":"August","name_def_article_lc":"the August","short_name":"Aug"},"9":{"short_name":"Sept","name_only":"September","name_def_article_lc":"the September","name_lc":"September","short_name_only":"Sept","in_month_lc":"in September","name_def_article_uc":"The September","month_2":"September","to_month_lc":"to September","name_uc":"September","genitive_uc":"September","month_1":"September","name_in":"September","on_day_month":"09","genitive_lc":"September","name_other":"September","name_with_year_only":"September","name_from":"September","short_name_uc":"September","name_to":"September","name":"September"}},
+b_weekday_formatted_date: {"1":{"name_lc":"Monday","name_other_uc":"Monday","name_from_preposition":"From Monday","name_uc":"Monday","shortest":"Mo","name_on":"Monday","name":"Monday","short":"Mon","name_from":"Monday","name_to":"Monday","short_uc":"Mon","name_other":"Monday"},"2":{"name_other_uc":"Tuesday","name_uc":"Tuesday","name_from_preposition":"From Tuesday","name_lc":"Tuesday","shortest":"Tu","name_on":"Tuesday","name":"Tuesday","name_to":"Tuesday","short":"Tue","name_from":"Tuesday","name_other":"Tuesday","short_uc":"Tue"},"3":{"name_lc":"Wednesday","name_other_uc":"Wednesday","name_from_preposition":"From Wednesday","name_uc":"Wednesday","shortest":"We","name_on":"Wednesday","name":"Wednesday","name_to":"Wednesday","short":"Wed","name_from":"Wednesday","short_uc":"Wed","name_other":"Wednesday"},"4":{"shortest":"Th","name_other_uc":"Thursday","name_from_preposition":"From Thursday","name_uc":"Thursday","name_lc":"Thursday","name_other":"Thursday","short_uc":"Thu","name_on":"Thursday","name":"Thursday","name_from":"Thursday","short":"Thu","name_to":"Thursday"},"5":{"name_other_uc":"Friday","name_from_preposition":"From Friday","name_uc":"Friday","name_lc":"Friday","shortest":"Fr","name":"Friday","name_on":"Friday","name_to":"Friday","short":"Fri","name_from":"Friday","name_other":"Friday","short_uc":"Fri"},"6":{"short_uc":"Sat","name_other":"Saturday","name_on":"Saturday","name":"Saturday","name_to":"Saturday","short":"Sat","name_from":"Saturday","shortest":"Sa","name_lc":"Saturday","name_other_uc":"Saturday","name_from_preposition":"From Saturday","name_uc":"Saturday"},"7":{"name":"Sunday","name_on":"Sunday","short":"Sun","name_to":"Sunday","name_from":"Sunday","name_other":"Sunday","short_uc":"Sun","name_other_uc":"Sunday","name_uc":"Sunday","name_from_preposition":"From Sunday","name_lc":"Sunday","shortest":"Su"},"8":{"name_from":"name_from","short":"short","name_to":"name_to","name":"Every day","name_on":"name_on","short_uc":"short_uc","name_other":"name_other","name_lc":"every day","name_from_preposition":"From any day","name_uc":"name_uc","name_other_uc":"name_other_uc","shortest":"shortest"}},
+b_time_format: {"AM_symbol":{"name":"AM"},"PM_symbol":{"name":"PM"},"time":{"name":"{hour_24h}:{minutes}"},"time_12":{"name":"{hour_12h_no0}:{minutes} {AM_PM}"},"time_24":{"name":"{hour_24h}:{minutes}"}},
+"b_protocol": 'https',
+auth_level : "0",
+b_user_auth_level_is_none : 1,
+b_check_ot_consent : 1,
+bui: {
+color: {
+bui_color_grayscale_dark: "#333333",
+bui_color_grayscale: "#6B6B6B",
+bui_color_grayscale_light: "#BDBDBD",
+bui_color_grayscale_lighter: "#E6E6E6",
+bui_color_grayscale_lightest: "#F5F5F5",
+bui_color_primary_dark: "#00224F",
+bui_color_primary: "#003580",
+bui_color_primary_light: "#BAD4F7",
+bui_color_primary_lighter: "#EBF3FF",
+bui_color_primary_lightest: "#FAFCFF",
+bui_color_complement_dark: "#CD8900",
+bui_color_complement: "#FEBB02",
+bui_color_complement_light: "#FFE08A",
+bui_color_complement_lighter: "#FDF4D8",
+bui_color_complement_lightest: "#FEFBF0",
+bui_color_callout_dark: "#BC5B01",
+bui_color_callout: "#FF8000",
+bui_color_callout_light: "#FFC489",
+bui_color_callout_lighter: "#FFF0E0",
+bui_color_callout_lightest: "#FFF8F0",
+bui_color_destructive_dark: "#A30000",
+bui_color_destructive: "#CC0000",
+bui_color_destructive_light: "#FCB4B4",
+bui_color_destructive_lighter: "#FFEBEB",
+bui_color_destructive_lightest: "#FFF0F0",
+bui_color_constructive_dark: "#006607",
+bui_color_constructive: "#008009",
+bui_color_constructive_light: "#97E59C",
+bui_color_constructive_lighter: "#E7FDE9",
+bui_color_constructive_lightest: "#F1FEF2",
+bui_color_action: "#0071C2",
+bui_color_white: "#FFFFFF",
+bui_color_black: "#000000"
+}
+},
+bb: {
+ibb: "",
+uibb: "",
+ibbta: "",
+itp: "0",
+iuibb: "",
+bme: "",
+euibb: "",
+tp: "2"
+},
+b_growls_close_fast: 1,
+fe_enable_login_with_phone_number: 1,
+b_hotel_history_count: parseInt('1', 10),
+asyncLoader: {
+async_assistant_entrypoint_css: 'https://cf.bstatic.com/static/css/assistant_entrypoint_cloudfront_sd.iq_ltr/611b70b00745fa4412a0101292fb0a1e4c97741e.css',
+async_assistant_entrypoint_js: 'https://cf.bstatic.com/static/js/assistant_entrypoint_cloudfront_sd/ef4280b820a27ed734dd50de76d082ea84a13f74.js',
+async_atlas_places_js: 'https://cf.bstatic.com/static/js/atlas_places_async_cloudfront_sd/c94b60c4da2dae6b55fd9eabf168f146fc189acf.js',
+async_atlas_v2_cn_js: 'https://cf.bstatic.com/static/js/async_atlas_v2_cn_cloudfront_sd/bd7e7adbf9731810a79badc567cd4846b1ab4d68.js',
+async_atlas_v2_non_cn_js: 'https://cf.bstatic.com/static/js/async_atlas_v2_non_cn_cloudfront_sd/880672823d34a6cc1366fd38f98c6b4ff90fcf20.js',
+image_gallery_js: 'https://cf.bstatic.com/static/js/ski_lp_overview_panel_cloudfront_sd/9d8e7cfd33a37ffb15285d98f6970024f06cf36d.js',
+image_gallery_css: 'https://cf.bstatic.com/static/css/ski_lp_overview_panel_cloudfront_sd.iq_ltr/2b3350935410fe4e36d74efed93daf74f2b4ff70.css',
+async_lists_js: 'https://cf.bstatic.com/static/js/async_lists_cloudfront_sd/bfcb1714bb8674563d57570f275aed580d76c585.js',
+async_atlas_css: 'https://cf.bstatic.com/static/css/async_atlas_hp_cloudfront_sd.iq_ltr/0fb2e1fc7c989ba0815b71aede4d6204142c5979.css',
+async_hp_atlas_map_js: 'https://cf.bstatic.com/static/js/async_hp_atlas_map_cloudfront_sd/67c7011204bb2b2467c223f5f7cdc8475f9416fa.js',
+async_wpm_overlay_css: 'https://cf.bstatic.com/static/css/async_wpm_overlay_assets_cloudfront_sd.iq_ltr/abb304bf3600a5cf5f7406a27f042cf1ce2429b1.css',
+async_wpm_overlay_js: 'https://cf.bstatic.com/static/js/async_wpm_overlay_assets_cloudfront_sd/c6cb9b63eea61102d4e96fe72b7c8008652fe925.js',
+async_slider_view_js: 'https://cf.bstatic.com/mobile/js/async_slider_view_cloudfront_sd/b99d37dd0f12a56f66e827b1f34dbf846a345b1f.js',
+async_slider_view_css: 'https://cf.bstatic.com/mobile/css/async_slider_view_cloudfront_sd.iq_ltr/6139b93e39f06ca17bf572c4b68667c465df625d.css',
+async_beach_team_pilot_js: 'https://cf.bstatic.com/mobile/js/async_beach_team_pilot_cloudfront_sd/4ce7a9b26fedcac6bcb0d7f157fb08a7f4d4befe.js',
+async_beach_team_pilot_css: 'https://cf.bstatic.com/mobile/css/async_beach_team_pilot_cloudfront_sd.iq_ltr/5c8824a36be7ddfbc4c5731de006aaaaf9f9c719.css',
+async_room_lightbox_js: 'https://cf.bstatic.com/static/js/async_room_lightbox_cloudfront_sd/33644a35e7a64eec39248ef644097801c65a6051.js',
+empty: ''
+},
+b_gallery_slide_onview: 1,
+fe_enable_fps_goal_with_value: 1,
+b_email_validation_regex : /^([\w-\.\+]+@([\w-]+\.)+[\w-]{2,14})?$/,
+b_domain_end : '.booking.com',
+b_original_url : 'https:&#47;&#47;www.booking.com&#47;hotel&#47;za&#47;the-hemingway-house-1415-min-from-or-tambo.en-gb.html?aid=356980&amp;label=gog235jc-1DCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQPoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIE4AIB&amp;sid=671a17eb382e6776a731e95cded70942&amp;dist=0&amp;keep_landing=1&amp;sb_price_type=total&amp;type=total&amp;',
+b_this_url : '/hotel/za/the-hemingway-house-1415-min-from-or-tambo.en-gb.html?aid=356980&label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&sid=671a17eb382e6776a731e95cded70942&room1=A%2CA;sb_price_type=total;type=total&',
+b_this_url_without_lang : '/hotel/za/the-hemingway-house-1415-min-from-or-tambo.html?aid=356980&label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&sid=671a17eb382e6776a731e95cded70942&room1=A%2CA;sb_price_type=total;type=total&',
+b_referrer : 'https:&#47;&#47;www.google.com&#47;',
+b_acc_type : '220',
+b_req_login: '',
+jst : {'loading': true},
+keep_day_month: true,
+b_timestamp : 1743167103,
+referal_tab: true,
+scripts_tracking : {
+atlas:{loaded:false,run:false},
+atlas_cst:{loaded:false,run:false},
+bhc:{loaded:false,run:false},
+calendar2:{loaded:false,run:false},
+hotel:{loaded:false,run:false},
+jquery:{loaded:false,run:false},
+main:{loaded:false,run:false}
+},
+enable_scripts_tracking : 1,
+b_ufi : '-1210234',
+"setvar_affiliate_is_bookings2" : 1,
+transl_close_x : 'close',
+transl_checkin_title: 'Check-in date',
+transl_checkout_title: 'Check-out date',
+browser_lang: 'en-gb',
+b_hijri_calendar_available: false,
+b_aid: '356980',
+b_label: 'gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB',
+b_sid: '671a17eb382e6776a731e95cded70942',
+ip_country: 'za',
+country_currency: 'ZAR',
+b_selected_currency: 'ZAR',
+b_selected_currency_is_hotel_currency: "",
+b_selected_language: 'en-gb',
+b_selected_language_country_flag: 'za',
+pageview_id: '6fad5bffee2b08ac',
+aid: '356980',
+b_csrf_token: 'v9bmZwAAAAA=mhKDENhi3tBsktaJl6G1BjcsZLqB2muHmGOoIoQTRhi0vVKwnhK0nxYJ_sDtB281TDxu6TNs695-8SiBsYh4qfMkQ8hhtiuWpVbbHoRsBTXNvC4Mb2OXB3hhFvUl52WJl158TxprbMHP6uJcw4o9cnPJNou1YzLUTQ86be0ffItXHUDhy0V_oyQFXM9-zm754eORMt11BDVuEj6a',
+b_show_user_accounts_features: 1,
+b_browser: 'chrome',
+b_browser_version: '131',
+et_debug_level: '0',
+icons: '/static/img',
+b_static_images: 'https://cf.bstatic.com/images/',
+b_currency_url: '/general.en-gb.html?aid=356980&label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&sid=671a17eb382e6776a731e95cded70942&amp;tmpl=currency_foldout&amp;cur_currency=ZAR&amp;cc1=za',
+b_currency_change_base_url: '/hotel/za/the-hemingway-house-1415-min-from-or-tambo.en-gb.html?aid=356980&label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&sid=671a17eb382e6776a731e95cded70942&room1=A%2CA&sb_price_type=total&type=total',
+b_languages_url: '/general.en-gb.html?aid=356980&label=gog235jc-1BCAso-wFCKnRoZS1oZW1pbmd3YXktaG91c2UtMTQxNS1taW4tZnJvbS1vci10YW1ib0gzWANo-wGIAQGYAQm4AQfIAQzYAQHoAQGIAgGoAgO4Av68mr8GwAIB0gIkZDBiYzZiYTYtZDg4Yi00NzY1LTgyNDAtZjM3MWZjZTQyYjE42AIF4AIB&sid=671a17eb382e6776a731e95cded70942&amp;tmpl=language_foldout',
+b_weekdays: [
+{"b_is_weekend": parseInt( '' ),
+"b_number": parseInt('1'),
+"name": 'Monday',
+"short": 'Mon',
+"shorter": 'Mon',
+"shortest": 'Mo'},
+{"b_is_weekend": parseInt( '' ),
+"b_number": parseInt('2'),
+"name": 'Tuesday',
+"short": 'Tue',
+"shorter": 'Tue',
+"shortest": 'Tu'},
+{"b_is_weekend": parseInt( '' ),
+"b_number": parseInt('3'),
+"name": 'Wednesday',
+"short": 'Wed',
+"shorter": 'Wed',
+"shortest": 'We'},
+{"b_is_weekend": parseInt( '' ),
+"b_number": parseInt('4'),
+"name": 'Thursday',
+"short": 'Thu',
+"shorter": 'Thu',
+"shortest": 'Th'},
+{"b_is_weekend": parseInt( '' ),
+"b_number": parseInt('5'),
+"name": 'Friday',
+"short": 'Fri',
+"shorter": 'Fri',
+"shortest": 'Fr'},
+{"b_is_weekend": parseInt( '1' ),
+"b_number": parseInt('6'),
+"name": 'Saturday',
+"short": 'Sat',
+"shorter": 'Sat',
+"shortest": 'Sa'},
+{"b_is_weekend": parseInt( '1' ),
+"b_number": parseInt('7'),
+"name": 'Sunday',
+"short": 'Sun',
+"shorter": 'Sun',
+"shortest": 'Su'},
+{}],
+b_group: [],
+b_group_rooms_wanted: 1,
+b_simple_weekdays: ['Mo','Tu','We','Th','Fr','Sa','Su'],
+b_simple_weekdays_for_js: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+b_long_weekdays: ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'],
+b_short_months: ['January','February','March','April','May','June','July','August','September','October','November','December'],
+b_short_months_abbr: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+b_year_months: {
+'2025-3': {'name': 'March 2025' },
+'2025-4': {'name': 'April 2025' },
+'2025-5': {'name': 'May 2025' },
+'2025-6': {'name': 'June 2025' },
+'2025-7': {'name': 'July 2025' },
+'2025-8': {'name': 'August 2025' },
+'2025-9': {'name': 'September 2025' },
+'2025-10': {'name': 'October 2025' },
+'2025-11': {'name': 'November 2025' },
+'2025-12': {'name': 'December 2025' },
+'2026-1': {'name': 'January 2026' },
+'2026-2': {'name': 'February 2026' },
+'2026-3': {'name': 'March 2026' },
+'2026-4': {'name': 'April 2026' },
+'2026-5': {'name': 'May 2026' },
+'2026-6': {'name': 'June 2026' }
+},
+b_is_landing : 1,
+b_user_auth_level_is_none: 1,
+b_is_fb_safe: 1,
+b_is_app: 1,
+first_page_of_results: true,
+b_is_single_unit_vr: true,
+b_partner_id: '441465',
+b_is_destination_finder_supported: 0,
+b_is_dsf: 0,
+b_pr_param: '',
+/*
+*/
+hotelAction: {
+showReviews: parseInt("1", 10),
+minReviews: parseInt("1", 10),
+hotelName: "the-hemingway-house-1415-min-from-or-tambo",
+pageLang: "en-gb",
+hotelCountry: "za"
+},
+feature_profile_split_sb_checkbox: 1,
+inandaround_more: "More",
+b_signup_iframe_url: 'https://secure.booking.com' + '/login.html?tmpl=profile/signup_after_subscribe' + '&lang=en-gb' ,
+b_exclude_lang_firstname: 0,
+view_prices_enter_dates: 'To view prices and availability, please enter your dates.',
+autocomplete_categories: {
+city: 'Cities',
+region: 'Regions',
+airport: 'Airports',
+hotel: 'Hotels',
+landmark: 'Landmarks',
+country: 'Countries',
+district: 'Districts',
+theme: 'Themes'
+},
+autocomplete_skip_suggestions: 'Search for more options',
+autocomplete_counter_label: 'Properties nearby',
+autocomplete : {
+property_nearby: '1 property nearby',
+properties_nearby: ' properties nearby',
+hotel: 'property',
+hotels: 'properties',
+hotels_nearby: 'Properties nearby'
+},
+lists: {
+collection: [
+{
+id: "0",
+name: "My next trip",
+hotels_count: "0"
+}
+]
+},
+touch_os: false,
+calendar_days_allowed_number: 337,
+b_search_max_months: 16,
+b_run_ge_new_newsletter_login: 1,
+b_password_strength_msg: ['Not long enough','Weak','Fair','Good','Strong','Very Strong'],
+b_passwd_min_length_error: 'Password needs to be at least 8 characters long',
+b_password_must_be_numeric: 'Your booking\'s PIN code should contain 4 digits. Please try again.',
+b_bkng_nr_must_be_numeric: 'Your booking number should contain 9 digits. Please try again.',
+b_blank_numeric_pin: 'Please enter your booking\'s PIN code.',
+b_blank_bkng_nr: 'Please enter your booking number.',
+password_cant_be_username: 'Your password cannot be the same as your email address',
+b_show_passwd: 'View password',
+b_passwd_tooltip: 'Include capital letters, special characters, and numbers to increase your password strength',
+account_error_add_password: 'Please add a password',
+password_needs_8: 'Password needs to be at least 8 characters long',
+error_sign_up_password_email_combo_01: 'Please check your email address or password and try again.',
+social_plugins_footer: 1,
+b_lazy_load_print_css: 1,
+print_css_href: 'https://cf.bstatic.com/static/css/print/0cc4ce4b7108d42a9f293fc9b654f749d84ba4eb.css',
+'component/dropdown-onload-shower/header_signin_prompt' : {
+b_action: "hotel"
+},
+b_hostname_signup: "www.booking.com",
+b_nonsecure_hostname: "https://www.booking.com",
+b_nonsecure_hostname_signup: "https://www.booking.com",
+b_fd_searchresults_url_signup: "",
+translation_customer_service_which_booking_no_specific: 'No specific reservation',
+stored_past_and_upcoming_bookings: [
+],
+global_translation_tags: {"nbsp":"&nbsp;","rlm":"\u200f","line_break":"\u003cbr\u003e","zwsp":"\u200b","lrm":"\u200e","one_dot_leader":"\u2024"},
+b_hotel_id: '11511918',
+b_hotel_name: 'The Hemingway House 1415 min from O.R Tambo.',
+b_hotel_image_url_square60: 'https://cf.bstatic.com/xdata/images/hotel/square60/526656191.jpg?k=b22350a77b08b1344bbc91eca9225b8bfc9ae836a5d9e30f456e57a7804a0573&o=&hp=1',
+hotelPhotos: [
+{
+id: '526656191',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526656191.jpg?k=b22350a77b08b1344bbc91eca9225b8bfc9ae836a5d9e30f456e57a7804a0573&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526656191.jpg?k=b22350a77b08b1344bbc91eca9225b8bfc9ae836a5d9e30f456e57a7804a0573&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526656191.jpg?k=b22350a77b08b1344bbc91eca9225b8bfc9ae836a5d9e30f456e57a7804a0573&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 14:41:58'
+,grid: {
+photo_width: 6240,
+photo_height: 4160,
+}
+}
+,
+{
+id: '534867526',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/534867526.jpg?k=2b7a2131b83e793c26180dcbb60287b95d49f960cc2245e8ceca10583433e040&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/534867526.jpg?k=2b7a2131b83e793c26180dcbb60287b95d49f960cc2245e8ceca10583433e040&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/534867526.jpg?k=2b7a2131b83e793c26180dcbb60287b95d49f960cc2245e8ceca10583433e040&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-03-08 15:24:16'
+,grid: {
+photo_width: 6240,
+photo_height: 4160,
+}
+}
+,
+{
+id: '526640178',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640178.jpg?k=7cd9bcc9cc9e1d55ae438e1d1aa8573a3aa3aeaa1ce5d8971f75cb217f760df8&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640178.jpg?k=7cd9bcc9cc9e1d55ae438e1d1aa8573a3aa3aeaa1ce5d8971f75cb217f760df8&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640178.jpg?k=7cd9bcc9cc9e1d55ae438e1d1aa8573a3aa3aeaa1ce5d8971f75cb217f760df8&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'portrait'
+,created : '2024-02-07 13:39:53'
+,grid: {
+photo_width: 455,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640159',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640159.jpg?k=65ff83e9bfda4b42aa36ab77afe3689409f3e22e4b8cd6b1a4830bae47dec14f&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640159.jpg?k=65ff83e9bfda4b42aa36ab77afe3689409f3e22e4b8cd6b1a4830bae47dec14f&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640159.jpg?k=65ff83e9bfda4b42aa36ab77afe3689409f3e22e4b8cd6b1a4830bae47dec14f&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:47'
+,grid: {
+photo_width: 6240,
+photo_height: 4160,
+}
+}
+,
+{
+id: '526640142',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640142.jpg?k=61805e892b1141a47e57a5fcb584f2e093f287fce34ae62cbf9265492fd8bdac&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640142.jpg?k=61805e892b1141a47e57a5fcb584f2e093f287fce34ae62cbf9265492fd8bdac&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640142.jpg?k=61805e892b1141a47e57a5fcb584f2e093f287fce34ae62cbf9265492fd8bdac&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'portrait'
+,created : '2024-02-07 13:39:42'
+,grid: {
+photo_width: 455,
+photo_height: 683,
+}
+}
+,
+{
+id: '529675849',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/529675849.jpg?k=f43d41608fbdadef6ee44e2a5f5e15cbc41fd82cea77728ef792c25fa14734b3&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/529675849.jpg?k=f43d41608fbdadef6ee44e2a5f5e15cbc41fd82cea77728ef792c25fa14734b3&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/529675849.jpg?k=f43d41608fbdadef6ee44e2a5f5e15cbc41fd82cea77728ef792c25fa14734b3&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-19 12:39:20'
+,grid: {
+photo_width: 6240,
+photo_height: 4160,
+}
+}
+,
+{
+id: '529675432',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/529675432.jpg?k=cb9f5e79cf30ced9c3a282ba3d1358b5d64e5c888341c109a9327613942287fe&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/529675432.jpg?k=cb9f5e79cf30ced9c3a282ba3d1358b5d64e5c888341c109a9327613942287fe&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/529675432.jpg?k=cb9f5e79cf30ced9c3a282ba3d1358b5d64e5c888341c109a9327613942287fe&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-19 12:37:56'
+,grid: {
+photo_width: 6240,
+photo_height: 4160,
+}
+}
+,
+{
+id: '526640068',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640068.jpg?k=f628d04e180c2e9bc757773904ae0b3260a07a9d92cd5640688f0216b0a5767b&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640068.jpg?k=f628d04e180c2e9bc757773904ae0b3260a07a9d92cd5640688f0216b0a5767b&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640068.jpg?k=f628d04e180c2e9bc757773904ae0b3260a07a9d92cd5640688f0216b0a5767b&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:11'
+,grid: {
+photo_width: 6240,
+photo_height: 4160,
+}
+}
+,
+{
+id: '526640116',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640116.jpg?k=2365e4126d8091be1eaf255f0314cc87daddab6671846200c60b1397f879613b&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640116.jpg?k=2365e4126d8091be1eaf255f0314cc87daddab6671846200c60b1397f879613b&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640116.jpg?k=2365e4126d8091be1eaf255f0314cc87daddab6671846200c60b1397f879613b&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:35'
+,grid: {
+photo_width: 1024,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640119',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640119.jpg?k=eb24b778a95c74c66440680574b501d7e5680e0484fae4c1b35cc242bb6d9eb2&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640119.jpg?k=eb24b778a95c74c66440680574b501d7e5680e0484fae4c1b35cc242bb6d9eb2&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640119.jpg?k=eb24b778a95c74c66440680574b501d7e5680e0484fae4c1b35cc242bb6d9eb2&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'portrait'
+,created : '2024-02-07 13:39:36'
+,grid: {
+photo_width: 455,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640122',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640122.jpg?k=d508168ccbd7dd832203d6eaa4d0871250171cbf7c507286ab78248f63399ef5&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640122.jpg?k=d508168ccbd7dd832203d6eaa4d0871250171cbf7c507286ab78248f63399ef5&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640122.jpg?k=d508168ccbd7dd832203d6eaa4d0871250171cbf7c507286ab78248f63399ef5&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:36'
+,grid: {
+photo_width: 1024,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640125',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640125.jpg?k=0e4830b893249493e753bda50a61b9bb0f555b00065370956344f332ae87d26b&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640125.jpg?k=0e4830b893249493e753bda50a61b9bb0f555b00065370956344f332ae87d26b&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640125.jpg?k=0e4830b893249493e753bda50a61b9bb0f555b00065370956344f332ae87d26b&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:37'
+,grid: {
+photo_width: 1024,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640128',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640128.jpg?k=39fb657e177c95a75485da2a36633b335c72159e84783265bda0f1e4caa9b21b&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640128.jpg?k=39fb657e177c95a75485da2a36633b335c72159e84783265bda0f1e4caa9b21b&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640128.jpg?k=39fb657e177c95a75485da2a36633b335c72159e84783265bda0f1e4caa9b21b&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:38'
+,grid: {
+photo_width: 1024,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640131',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640131.jpg?k=7977531e8ae1dba160c565676ba061ccaedb6d0a3ecddbe32f58e73a3be51389&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640131.jpg?k=7977531e8ae1dba160c565676ba061ccaedb6d0a3ecddbe32f58e73a3be51389&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640131.jpg?k=7977531e8ae1dba160c565676ba061ccaedb6d0a3ecddbe32f58e73a3be51389&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:39'
+,grid: {
+photo_width: 1024,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640134',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640134.jpg?k=6979124afaea55fe840e22f12e8ba96b518f29895fae75a617ff7ec4bd1251c4&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640134.jpg?k=6979124afaea55fe840e22f12e8ba96b518f29895fae75a617ff7ec4bd1251c4&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640134.jpg?k=6979124afaea55fe840e22f12e8ba96b518f29895fae75a617ff7ec4bd1251c4&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'portrait'
+,created : '2024-02-07 13:39:40'
+,grid: {
+photo_width: 455,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640138',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640138.jpg?k=2a6eb15dfe5a7eaf7504190b91ed67751f7c0b166b7ebaee650acdd776f3e248&o=&hp=1',
+large_url: 'https://cf.bstatic.com/xdata/images/hotel/max1024x768/526640138.jpg?k=2a6eb15dfe5a7eaf7504190b91ed67751f7c0b166b7ebaee650acdd776f3e248&o=&hp=1'
+,highres_url: 'https://cf.bstatic.com/xdata/images/hotel/max1280x900/526640138.jpg?k=2a6eb15dfe5a7eaf7504190b91ed67751f7c0b166b7ebaee650acdd776f3e248&o=&hp=1'
+,associated_rooms: [
+'1151191801'
+]
+,orientation: 'landscape'
+,created : '2024-02-07 13:39:41'
+,grid: {
+photo_width: 1024,
+photo_height: 683,
+}
+}
+,
+{
+id: '526640146',
+thumb_url: 'https://cf.bstatic.com/xdata/images/hotel/max200/526640146.jpg?
